@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent" android:layout_height="match_parent">
+
+    <!-- 桌布:圖片 / 影片 / 變暗遮罩 -->
+    <ImageView android:id="@+id/bgImage"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:scaleType="centerCrop" />
+    <TextureView android:id="@+id/bgVideo"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:visibility="gone" />
+    <View android:id="@+id/scrim"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <!-- 統一連續的底部柔白漸層：從 3D 車模底部上方一路平滑延伸到螢幕最底端導覽列，完全無切線 -->
+    <View android:id="@+id/bottomFadeBackdrop"
+        android:layout_width="match_parent" android:layout_height="180dp"
+        android:layout_gravity="bottom"
+        android:clickable="false"
+        android:focusable="false" />
+
+    <ScrollView android:id="@+id/scroll"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:clipToPadding="false" android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingTop="24dp">
+
+            <!-- 右上角設定 -->
+            <ImageView android:id="@+id/btnMore"
+                android:layout_width="48dp" android:layout_height="48dp"
+                android:layout_gravity="end"
+                android:layout_marginEnd="24dp"
+                android:contentDescription="設定" android:src="@drawable/ic_more" />
+
+            <!-- 3D 互動車輛展示區 (徹底滿版，左右 0 空白邊界，與下方分割欄位柔邊銜接) -->
+            <FrameLayout android:id="@+id/carContainer"
+                android:layout_width="match_parent" android:layout_height="0dp"
+                android:layout_weight="1"
+                android:minHeight="280dp"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="0dp" />
+
+            <!-- 分割畫面欄位：無獨立邊框底色，直接浮在連續漸層上 -->
+            <FrameLayout android:id="@+id/combosSection"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="-12dp"
+                android:paddingStart="24dp" android:paddingEnd="24dp"
+                android:paddingTop="16dp" android:paddingBottom="16dp">
+
+                <GridLayout android:id="@+id/combos"
+                    android:layout_width="match_parent" android:layout_height="wrap_content" />
+            </FrameLayout>
+        </LinearLayout>
+    </ScrollView>
+</FrameLayout>

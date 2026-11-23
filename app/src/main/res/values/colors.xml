@@ -1,0 +1,12 @@
+<resources>
+    <color name="bg">#F1F5F9</color>
+    <color name="card">#EBFFFFFF</color>
+    <color name="text">#0F172A</color>
+    <color name="sub">#64748B</color>
+    <color name="accent">#059669</color>
+    <color name="chip">#E2E8F0</color>
+    <color name="glass_top">#CCFFFFFF</color>
+    <color name="glass_bottom">#88FFFFFF</color>
+    <color name="glass_stroke">#26000000</color>
+    <color name="glass_highlight">#66FFFFFF</color>
+</resources>

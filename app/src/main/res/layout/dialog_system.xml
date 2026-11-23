@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/swCar3D"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="開啟 3D 車輛桌面展廳 (360° GLB)"
+            android:textSize="16sp"
+            android:paddingBottom="12dp"/>
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/swRainbowRoad"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="啟用彩虹大道模式 (GPS/模擬)"
+            android:textSize="16sp"
+            android:paddingBottom="12dp"/>
+
+        <Button
+            android:id="@+id/btnImportGlb"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="匯入自訂 3D 車輛模型 (.glb)"
+            android:layout_marginBottom="8dp"/>
+
+        <Button
+            android:id="@+id/btnResetGlb"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="還原預設 3D 車輛模型"
+            android:layout_marginBottom="16dp"/>
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/swNavBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="啟用虛擬導覽列"
+            android:textSize="16sp"
+            android:paddingBottom="12dp"/>
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/swAutoSpotify"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="啟動桌面時背景自動續播 Spotify"
+            android:textSize="16sp"
+            android:paddingBottom="4dp"/>
+
+        <TextView
+            android:id="@+id/tvSpotifyStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Spotify Remote 狀態檢查中…"
+            android:textSize="12sp"
+            android:alpha="0.72"
+            android:paddingBottom="8dp"/>
+
+        <Button
+            android:id="@+id/btnAuthSpotify"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="授權 Spotify Remote 連線"
+            android:visibility="gone"
+            android:layout_marginBottom="12dp"/>
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/swClusterMirror"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="外接儀表板畫面投影 (MediaProjection)"
+            android:textSize="16sp"
+            android:paddingBottom="4dp"/>
+
+        <TextView
+            android:id="@+id/tvMirrorStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="偵測中…"
+            android:textSize="12sp"
+            android:alpha="0.72"
+            android:paddingBottom="16dp"/>
+
+        <Button
+            android:id="@+id/btnSplitManager"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="分割畫面管理"/>
+
+    </LinearLayout>
+</ScrollView>

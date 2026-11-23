@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">AIBOX 桌面</string>
+    <string name="a11y_desc">用於顯示虛擬導覽列(返回/首頁/最近工作)。不會讀取或記錄畫面內容。</string>
+    <string name="mirror_channel_name">外接儀表板畫面投影</string>
+    <string name="mirror_channel_desc">透過 MediaProjection 將導航與車機畫面鏡像至外接儀表板顯示器</string>
+    <string name="mirror_notif_title">車機畫面鏡像投影運行中</string>
+    <string name="mirror_notif_starting">正在初始化外接儀表板投影…</string>
+    <string name="mirror_notif_waiting">已啟用投影，等待外接儀表板螢幕連線…</string>
+    <string name="mirror_notif_active">正在投影至：%1$s</string>
+    <string name="mirror_action_stop">停止投影</string>
+</resources>

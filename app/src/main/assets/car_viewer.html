@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="utf-8">
+    <title>3D Car Interactive Viewer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; user-select: none; -webkit-user-select: none; }
+        html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
+        #container {
+            width: 100%; height: 100%; display: block; position: absolute; top: 0; left: 0; z-index: 1;
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 7%, #000 82%, transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0%, #000 7%, #000 82%, transparent 100%);
+        }
+
+        /* 最下層超薄極簡膠囊列 (微型控制 & 速度狀態) */
+        .hud-layer {
+            position: absolute;
+            bottom: 28px;
+            left: 0;
+            width: 100%;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 0 4px;
+        }
+
+        .hud-bar {
+            pointer-events: auto;
+            background: rgba(15, 23, 42, 0.45);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 16px;
+            padding: 3px 8px;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            max-width: 98%;
+            overflow-x: auto;
+            white-space: nowrap;
+        }
+
+        .speed-pill {
+            font-size: 10px;
+            font-weight: 700;
+            color: #e2e8f0;
+            padding: 2px 7px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.08);
+            letter-spacing: 0.3px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .btn-chip {
+            background: rgba(255, 255, 255, 0.07);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 12px;
+            padding: 3px 9px;
+            font-size: 10px;
+            font-weight: 600;
+            color: #cbd5e1;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            outline: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .btn-chip:active, .btn-chip.active {
+            background: rgba(56, 189, 248, 0.32);
+            border-color: #38bdf8;
+            color: #ffffff;
+            box-shadow: 0 0 8px rgba(56, 189, 248, 0.38);
+        }
+        .btn-chip.rainbow.active {
+            background: linear-gradient(90deg, rgba(239,68,68,0.45), rgba(234,179,8,0.45), rgba(34,197,94,0.45), rgba(56,189,248,0.45), rgba(168,85,247,0.45));
+            border-color: rgba(255, 255, 255, 0.55);
+            color: #ffffff;
+            box-shadow: 0 0 10px rgba(168, 85, 247, 0.45);
+        }
+
+        /* 載入提示 */
+        #loading {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 20;
+            color: #ffffff;
+            font-size: 11px;
+            font-weight: 600;
+            background: rgba(0, 0, 0, 0.75);
+            padding: 6px 16px;
+            border-radius: 18px;
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255,255,255,0.2);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .spinner {
+            width: 12px; height: 12px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: #38bdf8;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+    <script src="three.min.js"></script>
+    <script src="GLTFLoader.js"></script>
+    <script src="OrbitControls.js"></script>
+</head>
+<body>
+    <div id="loading">
+        <div class="spinner"></div>
+        <span id="loadText">載入 3D 車輛模型中...</span>
+    </div>
+
+    <div id="container"></div>
+
+    <!-- 特斯拉輔助駕駛 / 彩虹大道極簡控制列 -->
+    <div class="hud-layer">
+        <div class="hud-bar">
+            <span class="speed-pill" id="speedReadout">0 km/h</span>
+            <button class="btn-chip rainbow active" id="btnRainbow" onclick="toggleRainbowRoad()">🌈 彩虹大道 ON</button>
+            <button class="btn-chip" id="btnDemoDrive" onclick="toggleDemoDrive()">🧪 模擬試駕</button>
+        </div>
+    </div>
+
+    <script>
+        const container = document.getElementById('container');
+        const loading = document.getElementById('loading');
+        const speedReadout = document.getElementById('speedReadout');
+        const btnRainbow = document.getElementById('btnRainbow');
+        const btnDemoDrive = document.getElementById('btnDemoDrive');
+
+        // 讀取 URL 參數
+        const urlParams = new URLSearchParams(window.location.search);
+        const modelUrl = urlParams.get('model') || 'carnew.glb';
+        let rainbowEnabled = urlParams.get('rainbow') !== 'false';
+
+        // 建立 3D 場景與攝影機
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerHeight, 0.1, 120);
+
+        // 特斯拉輔助駕駛標準視角：目標鎖定車輛幾何中心，轉動視角車子永遠保持在畫面可視範圍內
+        const fsdCamBasePos = new THREE.Vector3(0, 1.62, 3.35);
+        const fsdLookAtBase = new THREE.Vector3(0, 0.45, 0);
+        camera.position.copy(fsdCamBasePos);
+
+        const renderer = new THREE.WebGLRenderer({
+            antialias: true,
+            alpha: true,
+            powerPreference: "high-performance",
+            stencil: false,
+            depth: true
+        });
+        // 在 15.6 吋螢幕上保留原生畫質不壓縮，最高支援至 2.0 倍像素比以確保線條銳利
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.0));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        renderer.toneMapping = THREE.LinearToneMapping;
+        renderer.toneMappingExposure = 1.05;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.06;
+        controls.enableZoom = true;
+        controls.zoomSpeed = 1.0;
+        controls.enablePan = false;
+        controls.screenSpacePanning = false;
+        controls.minPolarAngle = 0.25;
+        controls.maxPolarAngle = Math.PI / 2 - 0.05;
+        controls.minDistance = 1.25;
+        controls.maxDistance = 8.8;
+        controls.target.copy(fsdLookAtBase);
+        controls.update();
+
+        let isUserInteracting = false;
+        let resetTimer = null;
+
+        controls.addEventListener('start', function () {
+            isUserInteracting = true;
+            controls.target.copy(fsdLookAtBase);
+            if (resetTimer) clearTimeout(resetTimer);
+        });
+
+        controls.addEventListener('end', function () {
+            if (resetTimer) clearTimeout(resetTimer);
+            const delay = currentSpeedKmh >= 2.0 ? 1200 : 3500;
+            resetTimer = setTimeout(function () {
+                isUserInteracting = false;
+            }, delay);
+        });
+
+        // 展廳 / 輔助駕駛燈光 (針對高通 6350 Adreno GPU 精簡為半球天光 + 單主光源，畫質不減但著色器負載大幅降低)
+        const hemiLight = new THREE.HemisphereLight(0xf1f5f9, 0x334155, 1.35);
+        hemiLight.position.set(0, 12, 0);
+        scene.add(hemiLight);
+
+        const mainSun = new THREE.DirectionalLight(0xffffff, 1.45);
+        mainSun.position.set(4, 10, 6);
+        scene.add(mainSun);
+
+        // 車底漸層陰影 (固定跟隨車輛)
+        const shadowCanvas = document.createElement('canvas');
+        shadowCanvas.width = 512;
+        shadowCanvas.height = 512;
+        const shadowCtx = shadowCanvas.getContext('2d');
+        const gradient = shadowCtx.createRadialGradient(256, 256, 12, 256, 256, 230);
+        gradient.addColorStop(0, 'rgba(0, 0, 0, 0.8)');
+        gradient.addColorStop(0.35, 'rgba(0, 0, 0, 0.45)');
+        gradient.addColorStop(0.75, 'rgba(0, 0, 0, 0.14)');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        shadowCtx.fillStyle = gradient;
+        shadowCtx.fillRect(0, 0, 512, 512);
+
+        const shadowTexture = new THREE.CanvasTexture(shadowCanvas);
+        const shadowPlane = new THREE.Mesh(
+            new THREE.PlaneGeometry(1.6, 2.5),
+            new THREE.MeshBasicMaterial({
+                map: shadowTexture,
+                transparent: true,
+                opacity: 0.78,
+                depthWrite: false
+            })
+        );
+        shadowPlane.rotation.x = -Math.PI / 2;
+        shadowPlane.position.y = 0.015;
+        scene.add(shadowPlane);
+
+        // ================= 特斯拉 FSD + 彩虹大道 3D 道路曲面 (高銳利度版) =================
+        const ROAD_SEGMENTS = 96;
+        const ROAD_Z_START = 6.5;
+        const ROAD_Z_END = -42.0;
+        const ROAD_HALF_WIDTH = 1.45;
+
+        const roadPositions = new Float32Array((ROAD_SEGMENTS + 1) * 2 * 3);
+        const roadUvs = new Float32Array((ROAD_SEGMENTS + 1) * 2 * 2);
+        const roadIndices = [];
+
+        for (let i = 0; i <= ROAD_SEGMENTS; i++) {
+            const t = i / ROAD_SEGMENTS;
+            const z = ROAD_Z_START + (ROAD_Z_END - ROAD_Z_START) * t;
+            const idx = i * 2;
+
+            roadPositions[idx * 3 + 0] = -ROAD_HALF_WIDTH;
+            roadPositions[idx * 3 + 1] = 0.0;
+            roadPositions[idx * 3 + 2] = z;
+
+            roadPositions[(idx + 1) * 3 + 0] = ROAD_HALF_WIDTH;
+            roadPositions[(idx + 1) * 3 + 1] = 0.0;
+            roadPositions[(idx + 1) * 3 + 2] = z;
+
+            roadUvs[idx * 2 + 0] = -1.0;
+            roadUvs[idx * 2 + 1] = -z;
+
+            roadUvs[(idx + 1) * 2 + 0] = 1.0;
+            roadUvs[(idx + 1) * 2 + 1] = -z;
+
+            if (i < ROAD_SEGMENTS) {
+                const a = idx;
+                const b = idx + 1;
+                const c = idx + 2;
+                const d = idx + 3;
+                roadIndices.push(a, b, c, b, d, c);
+            }
+        }
+
+        const roadGeo = new THREE.BufferGeometry();
+        roadGeo.setAttribute('position', new THREE.BufferAttribute(roadPositions, 3));
+        roadGeo.setAttribute('uv', new THREE.BufferAttribute(roadUvs, 2));
+        roadGeo.setIndex(roadIndices);
+
+        const roadUniforms = {
+            uRainbowFlow: { value: 0.0 },
+            uWavePhase: { value: 0.0 },
+            uDashPhase: { value: 0.0 },
+            uIdlePhase: { value: 0.0 },
+            uRainbow: { value: rainbowEnabled ? 1.0 : 0.0 },
+            uSpeedNorm: { value: 0.0 }
+        };
+
+        const roadMat = new THREE.ShaderMaterial({
+            uniforms: roadUniforms,
+            transparent: true,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+            vertexShader: `
+                varying vec2 vRoadUv;
+                void main() {
+                    vRoadUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                #ifdef GL_FRAGMENT_PRECISION_HIGH
+                precision highp float;
+                #else
+                precision mediump float;
+                #endif
+
+                varying vec2 vRoadUv;
+                uniform float uRainbowFlow;
+                uniform float uWavePhase;
+                uniform float uDashPhase;
+                uniform float uIdlePhase;
+                uniform float uRainbow;
+                uniform float uSpeedNorm;
+
+                const float TAU = 6.2831853;
+
+                vec3 rainbowPalette(float t) {
+                    vec3 a = vec3(0.52, 0.52, 0.54);
+                    vec3 b = vec3(0.48, 0.48, 0.46);
+                    vec3 c = vec3(1.0, 1.0, 1.0);
+                    vec3 d = vec3(0.00, 0.33, 0.67);
+                    return a + b * cos(TAU * (c * t + d));
+                }
+
+                void main() {
+                    float lat = vRoadUv.x;        // -1 .. +1
+                    float absLat = abs(lat);
+                    float dist = vRoadUv.y;       // 前方距離 (>0 往前, <0 往後)
+
+                    // 保持近中距離 20 單位內 100% 清晰，遠方地平線才平滑淡出
+                    float farFade = smoothstep(42.0, 20.0, dist);
+                    float nearFade = smoothstep(-6.2, -1.6, dist);
+                    float sideFade = 1.0 - smoothstep(0.88, 1.0, absLat);
+                    float envAlpha = farFade * nearFade * sideFade;
+                    if (envAlpha <= 0.002) discard;
+
+                    // 1. 一般 Tesla FSD 深邃路面與銳利中央導引線
+                    vec3 fsdBase = vec3(0.045, 0.075, 0.13);
+                    float fsdCore = exp(-pow(absLat / 0.14, 2.0));
+                    float fsdLine = 1.0 - smoothstep(0.015, 0.028, absLat);
+                    float fsdPulse = 0.78 + 0.22 * cos(TAU * (dist * 0.15 + uWavePhase));
+                    vec3 fsdPathColor = mix(fsdBase, vec3(0.16, 0.72, 1.0), (fsdCore * 0.48 + fsdLine * 0.65) * fsdPulse);
+
+                    // 2. 精緻高解析特斯拉彩虹大道
+                    float chevron = absLat * 0.48;
+                    float lateralGrad = (lat * 0.5 + 0.5) * 0.92;
+                    float flowGrad = dist * 0.08 + uRainbowFlow + uIdlePhase * 0.25;
+                    vec3 rbPrimary = rainbowPalette(lateralGrad + flowGrad - chevron * 0.35);
+                    vec3 rbAccent = rainbowPalette(lateralGrad * 1.08 - dist * 0.03 + uRainbowFlow * 0.5 + 0.14);
+                    vec3 rbColor = mix(rbPrimary, rbAccent, 0.25);
+
+                    // 細緻光軌條紋 (微弱玻璃反射紋理，消除模糊色塊感)
+                    float microTrack = 0.92 + 0.08 * cos(absLat * 38.0);
+                    rbColor *= microTrack;
+
+                    // 銳利前向箭頭能量波紋 (Chevron Light Bars)
+                    float waveCoord = fract(dist * 0.22 + uWavePhase - absLat * 0.30);
+                    float waveBar = exp(-pow((waveCoord - 0.5) * 4.5, 2.0));
+                    float waveEnergy = mix(0.10, 0.55, uSpeedNorm) * waveBar;
+                    rbColor = rbColor * (0.88 + 0.18 * waveBar) + vec3(waveEnergy * 0.55);
+
+                    // 中央微弱高光光脊
+                    float centerRidge = exp(-pow(absLat / 0.16, 2.0));
+                    rbColor += vec3(centerRidge * (0.06 + 0.18 * uSpeedNorm));
+
+                    // 主車道精準裁切 (銳利邊緣 0.435..0.445，告別糊邊)
+                    float inMainLane = 1.0 - smoothstep(0.432, 0.446, absLat);
+                    vec3 laneFill = mix(fsdBase, rbColor, inMainLane * 0.95);
+                    vec3 roadColor = mix(fsdPathColor, laneFill, uRainbow);
+
+                    // 3. 銳利雙層發光車道白線 (細核心白線 + 緊湊外光暈)
+                    float edgeDist = abs(absLat - 0.444);
+                    float crispBorderCore = 1.0 - smoothstep(0.007, 0.014, edgeDist);
+                    float tightBorderGlow = exp(-pow(edgeDist / 0.032, 2.0)) * 0.45;
+                    vec3 borderColor = mix(vec3(0.86, 0.95, 1.0), rbPrimary * 0.30 + vec3(0.82), uRainbow * 0.55);
+                    float borderWeight = clamp(crispBorderCore + tightBorderGlow, 0.0, 1.0);
+                    roadColor = mix(roadColor, borderColor, borderWeight);
+
+                    // 4. 外側銳利高速流光線 (車速越快越明顯)
+                    float streakDist = abs(absLat - 0.64);
+                    float streakLine = 1.0 - smoothstep(0.005, 0.012, streakDist);
+                    float streakPhase = fract(dist * 0.18 + uDashPhase * 1.6);
+                    float streakDash = smoothstep(0.58, 0.63, streakPhase) * (1.0 - smoothstep(0.90, 0.95, streakPhase));
+                    float speedVis = smoothstep(0.06, 0.72, uSpeedNorm);
+                    vec3 streakColor = mix(vec3(0.40, 0.86, 1.0), rbPrimary + vec3(0.30), uRainbow);
+                    float streakAlpha = streakLine * streakDash * speedVis * 0.80;
+                    roadColor = mix(roadColor, streakColor, streakAlpha);
+
+                    // 5. 外側防鋸齒銳利車道虛線 (|lat| = 0.84)
+                    float outerDashLine = 1.0 - smoothstep(0.006, 0.013, abs(absLat - 0.84));
+                    float dashCoord = fract(dist * 0.30 + uDashPhase);
+                    float dashSeg = smoothstep(0.42, 0.45, dashCoord) * (1.0 - smoothstep(0.88, 0.91, dashCoord));
+                    float outerDashAlpha = outerDashLine * dashSeg * 0.85;
+                    roadColor = mix(roadColor, vec3(0.85, 0.93, 1.0), outerDashAlpha);
+
+                    // 6. 路面整體透明度整合
+                    float baseOpacity = mix(0.42, 0.78 + 0.08 * uSpeedNorm, inMainLane);
+                    baseOpacity = max(baseOpacity, crispBorderCore * 0.96 + tightBorderGlow * 0.45);
+                    baseOpacity = max(baseOpacity, streakAlpha);
+                    baseOpacity = max(baseOpacity, outerDashAlpha * 0.78);
+
+                    gl_FragColor = vec4(roadColor, clamp(baseOpacity, 0.0, 1.0) * envAlpha);
+                }
+            `
+        });
+
+        const roadMesh = new THREE.Mesh(roadGeo, roadMat);
+        roadMesh.position.y = 0.002;
+        roadMesh.frustumCulled = false;
+        scene.add(roadMesh);
+
+        // 車模變數與邊界約束變數
+        let carModel = null;
+        let carHeight = 1.0;
+        let carRadius = 1.05;
+        let carBoundsCorners = [];
+        const _camDir = new THREE.Vector3();
+        const _projVec = new THREE.Vector3();
+        let demoDrive = false;
+
+        let defaultFollowDist = 3.35;
+
+        function updateSafeCameraDistanceBounds() {
+            const vHalfFov = (camera.fov * 0.5) * Math.PI / 180.0;
+            const tanV = Math.tan(vHalfFov);
+            const tanH = tanV * Math.max(0.35, camera.aspect);
+            const hHalfFov = Math.atan(tanH);
+            const paddedR = carRadius * 1.12;
+            const safeDistV = paddedR / Math.max(0.15, Math.sin(vHalfFov));
+            const safeDistH = paddedR / Math.max(0.15, Math.sin(hHalfFov));
+            // 僅用於自動回正的預設距離，保留手動雙指放大縮小的自由度 (1.25 .. 8.8)
+            defaultFollowDist = Math.max(3.1, Math.min(5.2, Math.max(safeDistV, safeDistH) * 0.72));
+            controls.minDistance = 1.25;
+            controls.maxDistance = 8.8;
+        }
+
+        function enforceCameraBounds() {
+            // 1. 強制鎖定旋轉中心在車輛幾何中心，確保轉動視角時車子始終在畫面正中央
+            controls.target.copy(fsdLookAtBase);
+
+            // 2. 限制縮放距離範圍與最低高度（防止穿入地面以下，同時允許自由雙指放大縮小）
+            _camDir.copy(camera.position).sub(fsdLookAtBase);
+            let dist = _camDir.length();
+            if (dist < 0.001) {
+                _camDir.set(0, 1.0, 2.5).normalize();
+                dist = defaultFollowDist;
+            } else {
+                _camDir.divideScalar(dist);
+            }
+            dist = Math.max(controls.minDistance, Math.min(controls.maxDistance, dist));
+            camera.position.copy(fsdLookAtBase).addScaledVector(_camDir, dist);
+            if (camera.position.y < 0.22) {
+                camera.position.y = 0.22;
+            }
+        }
+
+        let targetSpeedKmh = 0.0;
+        let currentSpeedKmh = 0.0;
+        let rainbowFlowPhase = 0.0;
+        let waveFlowPhase = 0.0;
+        let dashFlowPhase = 0.0;
+        let idleFlowPhase = 0.0;
+
+        let smoothedBearingDeg = -1;
+        let smoothedTurnRate = 0.0;
+        let lastBearingTimeMs = 0;
+        let lastRealGpsTimeMs = 0;
+        let targetCurvature = 0.0;
+        let currentCurvature = 0.0;
+
+        let currentCamTarget = fsdLookAtBase.clone();
+        let desiredCamPos = fsdCamBasePos.clone();
+        let desiredLookAt = fsdLookAtBase.clone();
+
+        function updateRoadGeometry(curvature) {
+            const posAttr = roadGeo.attributes.position;
+            const arr = posAttr.array;
+            for (let i = 0; i <= ROAD_SEGMENTS; i++) {
+                const t = i / ROAD_SEGMENTS;
+                const z = ROAD_Z_START + (ROAD_Z_END - ROAD_Z_START) * t;
+                const d = Math.max(0.0, -z - 0.5);
+                // 拋物線彎道：車身下方維持筆直對齊輪胎，車頭前方依 curvature 平滑左右彎曲
+                const cx = curvature * d * d * 0.022;
+                const slope = curvature * 2.0 * d * 0.022;
+                const invLen = 1.0 / Math.sqrt(1.0 + slope * slope);
+                const rx = invLen;
+                const rz = slope * invLen;
+
+                const idx = i * 2;
+                arr[idx * 3 + 0] = cx - ROAD_HALF_WIDTH * rx;
+                arr[idx * 3 + 1] = 0.0;
+                arr[idx * 3 + 2] = z - ROAD_HALF_WIDTH * rz;
+
+                arr[(idx + 1) * 3 + 0] = cx + ROAD_HALF_WIDTH * rx;
+                arr[(idx + 1) * 3 + 1] = 0.0;
+                arr[(idx + 1) * 3 + 2] = z + ROAD_HALF_WIDTH * rz;
+            }
+            posAttr.needsUpdate = true;
+        }
+
+        // 載入 GLB 車輛模型 (含背面剔除優化、高清晰非等向性過濾、載入進度與失敗提示)
+        const loadTextEl = document.getElementById('loadText');
+        const maxAniso = Math.min(4, renderer.capabilities.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 1);
+        const loader = new THREE.GLTFLoader();
+        loader.load(modelUrl, function (gltf) {
+            carModel = gltf.scene;
+
+            carModel.traverse(function (node) {
+                if (node.isMesh && node.material) {
+                    const mats = Array.isArray(node.material) ? node.material : [node.material];
+                    mats.forEach(m => {
+                        if (!m) return;
+                        // 僅透明材質用雙面，不透明車殼改用 FrontSide 背面剔除，GPU 渲染負載直接減半且畫質零損耗
+                        m.side = m.transparent ? THREE.DoubleSide : THREE.FrontSide;
+                        [m.map, m.normalMap, m.roughnessMap, m.metalnessMap].forEach(tex => {
+                            if (tex) {
+                                tex.anisotropy = maxAniso;
+                                if (tex === m.map) tex.encoding = THREE.sRGBEncoding;
+                            }
+                        });
+                    });
+                }
+            });
+
+            const box0 = new THREE.Box3().setFromObject(carModel);
+            const size0 = box0.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size0.x, size0.y, size0.z);
+            const scale = 1.75 / (maxDim || 1);
+            carModel.scale.set(scale, scale, scale);
+
+            // 車屁股朝使用者 (+Z)，車頭朝前方道路 (-Z)
+            carModel.rotation.y = Math.PI;
+            carModel.updateMatrixWorld(true);
+
+            const box = new THREE.Box3().setFromObject(carModel);
+            const center = box.getCenter(new THREE.Vector3());
+            carModel.position.x -= center.x;
+            carModel.position.z -= center.z;
+            carModel.position.y -= box.min.y;
+            carModel.updateMatrixWorld(true);
+
+            // 凍結靜態車輛節點矩陣更新，降低高通 6350 CPU 每幀開銷
+            carModel.traverse(function (node) {
+                node.updateMatrix();
+                node.matrixAutoUpdate = false;
+            });
+
+            // 計算校正後車輛包圍盒與幾何中心，作為相機邊界鎖定基準
+            const alignedBox = new THREE.Box3().setFromObject(carModel);
+            const alignedCenter = alignedBox.getCenter(new THREE.Vector3());
+            const sphere = new THREE.Sphere();
+            alignedBox.getBoundingSphere(sphere);
+
+            carHeight = alignedBox.max.y - alignedBox.min.y;
+            carRadius = Math.max(0.7, sphere.radius);
+            fsdLookAtBase.set(alignedCenter.x, alignedCenter.y + carHeight * 0.15, alignedCenter.z);
+            controls.target.copy(fsdLookAtBase);
+            currentCamTarget.copy(fsdLookAtBase);
+
+            carBoundsCorners = [
+                new THREE.Vector3(alignedBox.min.x, alignedBox.min.y, alignedBox.min.z),
+                new THREE.Vector3(alignedBox.min.x, alignedBox.min.y, alignedBox.max.z),
+                new THREE.Vector3(alignedBox.min.x, alignedBox.max.y, alignedBox.min.z),
+                new THREE.Vector3(alignedBox.min.x, alignedBox.max.y, alignedBox.max.z),
+                new THREE.Vector3(alignedBox.max.x, alignedBox.min.y, alignedBox.min.z),
+                new THREE.Vector3(alignedBox.max.x, alignedBox.min.y, alignedBox.max.z),
+                new THREE.Vector3(alignedBox.max.x, alignedBox.max.y, alignedBox.min.z),
+                new THREE.Vector3(alignedBox.max.x, alignedBox.max.y, alignedBox.max.z)
+            ];
+
+            updateSafeCameraDistanceBounds();
+            enforceCameraBounds();
+            controls.update();
+
+            scene.add(carModel);
+            loading.style.display = 'none';
+        }, function (xhr) {
+            if (loadTextEl && xhr && xhr.total > 0) {
+                const pct = Math.min(99, Math.round((xhr.loaded / xhr.total) * 100));
+                loadTextEl.innerText = '載入 3D 車輛模型中... ' + pct + '%';
+            }
+        }, function (error) {
+            console.warn('GLB file load error:', error);
+            if (loadTextEl) {
+                loadTextEl.innerText = '3D 模型載入失敗 (檔案過大或記憶體不足)';
+            }
+            setTimeout(function () { loading.style.display = 'none'; }, 3500);
+        });
+
+        function updateRainbowUi() {
+            if (rainbowEnabled) {
+                btnRainbow.innerText = '🌈 彩虹大道 ON';
+                btnRainbow.classList.add('active');
+            } else {
+                btnRainbow.innerText = '🛣️ 輔助車道';
+                btnRainbow.classList.remove('active');
+            }
+        }
+        updateRainbowUi();
+
+        window.setRainbowRoad = function (enabled) {
+            rainbowEnabled = !!enabled;
+            updateRainbowUi();
+        };
+
+        function toggleRainbowRoad() {
+            rainbowEnabled = !rainbowEnabled;
+            updateRainbowUi();
+            if (window.AndroidBridge && window.AndroidBridge.setRainbowRoad) {
+                window.AndroidBridge.setRainbowRoad(rainbowEnabled);
+            }
+        }
+
+        window.setGpsData = function (kmh, bearingDeg) {
+            const speed = Math.max(0, Number(kmh) || 0);
+            const now = performance.now();
+
+            // 若收到真實移動 GPS 資料，自動結束模擬試駕
+            if (speed >= 3.0 && demoDrive) {
+                demoDrive = false;
+                btnDemoDrive.classList.remove('active');
+                btnDemoDrive.innerText = '🧪 模擬試駕';
+            }
+            if (!demoDrive) {
+                targetSpeedKmh = speed;
+                lastRealGpsTimeMs = now;
+            }
+
+            if (!demoDrive && speed < 3.0) {
+                smoothedBearingDeg = -1;
+                smoothedTurnRate = 0.0;
+                targetCurvature = 0.0;
+            } else if (!demoDrive && speed >= 5.0 && bearingDeg !== undefined && bearingDeg !== null && bearingDeg >= 0 && !Number.isNaN(bearingDeg)) {
+                const normBearing = ((Number(bearingDeg) % 360.0) + 360.0) % 360.0;
+                if (smoothedBearingDeg < 0 || (now - lastBearingTimeMs) > 2500) {
+                    smoothedBearingDeg = normBearing;
+                    smoothedTurnRate = 0.0;
+                    lastBearingTimeMs = now;
+                } else {
+                    const dtSec = (now - lastBearingTimeMs) / 1000.0;
+                    if (dtSec >= 0.08) {
+                        const clampedDt = Math.min(2.5, dtSec);
+                        let rawDelta = normBearing - smoothedBearingDeg;
+                        if (rawDelta > 180) rawDelta -= 360;
+                        if (rawDelta < -180) rawDelta += 360;
+
+                        if (clampedDt < 1.2 && Math.abs(rawDelta) > 95) {
+                            rawDelta = Math.sign(rawDelta) * 95;
+                        }
+
+                        // 先對航向角做指數平滑，消除 GPS 跳動造成的正負號反覆翻轉
+                        const bearingAlpha = 1.0 - Math.exp(-clampedDt / 0.55);
+                        const filteredStep = rawDelta * bearingAlpha;
+                        smoothedBearingDeg = (smoothedBearingDeg + filteredStep + 360.0) % 360.0;
+
+                        let instTurnRate = Math.max(-42.0, Math.min(42.0, filteredStep / clampedDt));
+                        if (Math.abs(instTurnRate) < 2.5) {
+                            instTurnRate = 0.0;
+                        }
+
+                        // 轉彎中若出現微弱反向 GPS 雜訊，抑制反轉避免車道左右搖擺
+                        if (Math.abs(smoothedTurnRate) > 4.0 && instTurnRate * smoothedTurnRate < 0 && Math.abs(instTurnRate) < 12.0) {
+                            instTurnRate = 0.0;
+                        }
+
+                        const rateAlpha = 1.0 - Math.exp(-clampedDt / 0.45);
+                        smoothedTurnRate += (instTurnRate - smoothedTurnRate) * rateAlpha;
+
+                        targetCurvature = Math.max(-1.45, Math.min(1.45, smoothedTurnRate / 24.0));
+                        if (Math.abs(targetCurvature) < 0.025) {
+                            targetCurvature = 0.0;
+                        }
+                        lastBearingTimeMs = now;
+                    }
+                }
+            }
+        };
+
+        window.setGpsSpeed = function (kmh) {
+            window.setGpsData(kmh, -1);
+        };
+
+        window.setDecalDataUrl = function (_dataUrl) {
+            // 保留橋接相容性
+        };
+
+        function toggleDemoDrive() {
+            demoDrive = !demoDrive;
+            if (demoDrive) {
+                btnDemoDrive.innerText = '🧪 試駕中';
+                btnDemoDrive.classList.add('active');
+            } else {
+                btnDemoDrive.innerText = '🧪 模擬試駕';
+                btnDemoDrive.classList.remove('active');
+                targetSpeedKmh = 0;
+                targetCurvature = 0;
+                smoothedBearingDeg = -1;
+                smoothedTurnRate = 0.0;
+            }
+        }
+
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            updateSafeCameraDistanceBounds();
+            enforceCameraBounds();
+        }
+
+        let prevFrameTime = performance.now();
+        let lastRenderTime = 0;
+        let lastRoadCurvature = 0.0;
+        let lastDisplayedKmh = -1;
+        let isPaused = false;
+        let isLiteMode = false;
+
+        window.pauseAnimation = function() {
+            isPaused = true;
+        };
+
+        window.resumeAnimation = function() {
+            if (isPaused) {
+                isPaused = false;
+                prevFrameTime = performance.now();
+                requestAnimationFrame(animate);
+            }
+        };
+
+        window.setLiteMode = function(enabled) {
+            isLiteMode = !!enabled;
+            if (renderer) {
+                const ratio = isLiteMode ? Math.min(window.devicePixelRatio || 1, 1.25) : Math.min(window.devicePixelRatio || 1, 2);
+                renderer.setPixelRatio(ratio);
+            }
+        };
+
+        window.disposeWebGL = function() {
+            isPaused = true;
+            if (renderer) {
+                try {
+                    renderer.dispose();
+                    const gl = renderer.getContext();
+                    if (gl) {
+                        const loseContext = gl.getExtension('WEBGL_lose_context');
+                        if (loseContext) loseContext.loseContext();
+                    }
+                } catch(e) {}
+            }
+        };
+
+        function animate(now) {
+            if (isPaused) return;
+            requestAnimationFrame(animate);
+
+            // 分屏降載 (Lite Mode) 限制 30fps/12.5fps；標準模式動態 60fps/24fps 省電
+            const isActiveScene = (currentSpeedKmh >= 0.3 || targetSpeedKmh >= 0.3 || isUserInteracting || demoDrive || Math.abs(currentCurvature) > 0.01);
+            const targetInterval = isLiteMode ? (isActiveScene ? 33 : 80) : (isActiveScene ? 0 : 40);
+            if (targetInterval > 0 && (now - lastRenderTime) < targetInterval) {
+                return;
+            }
+            lastRenderTime = now;
+
+            const dt = Math.min(0.05, Math.max(0.001, (now - prevFrameTime) / 1000.0));
+            prevFrameTime = now;
+
+            // 模擬試駕模式 (供室內無 GPS 訊號時預覽速度與彎道)
+            if (demoDrive) {
+                const t = now * 0.001;
+                targetSpeedKmh = 52.0 + 26.0 * Math.sin(t * 0.55);
+                targetCurvature = Math.sin(t * 0.85) * 1.15;
+            } else if (currentSpeedKmh < 4.0 || (now - lastBearingTimeMs) > 1300) {
+                // 低速或 GPS 轉向訊號暫停超過 1.3 秒時，平滑回正車道；行駛轉彎途中保持穩定曲率不脈動回彈
+                const decay = Math.exp(-dt * 1.6);
+                smoothedTurnRate *= decay;
+                targetCurvature *= decay;
+                if (Math.abs(targetCurvature) < 0.01) targetCurvature = 0.0;
+            }
+
+            // 平滑速度與彎道曲率
+            currentSpeedKmh += (targetSpeedKmh - currentSpeedKmh) * Math.min(1.0, dt * 4.0);
+            if (currentSpeedKmh < 0.15 && targetSpeedKmh === 0) currentSpeedKmh = 0;
+
+            currentCurvature += (targetCurvature - currentCurvature) * Math.min(1.0, dt * 3.2);
+            if (Number.isNaN(lastRoadCurvature) || Math.abs(currentCurvature - lastRoadCurvature) > 0.0005) {
+                updateRoadGeometry(currentCurvature);
+                lastRoadCurvature = currentCurvature;
+            }
+
+            // 更新道路著色器循環相位 (歸一化至 0..1，確保長時間行駛完全不抖動且平順流暢)
+            const speedMetersPerSec = currentSpeedKmh / 3.6;
+            const speedNorm = Math.min(1.0, currentSpeedKmh / 100.0);
+            rainbowFlowPhase = (rainbowFlowPhase + speedMetersPerSec * 0.058 * dt) % 1.0;
+            waveFlowPhase = (waveFlowPhase + speedMetersPerSec * 0.145 * dt) % 1.0;
+            dashFlowPhase = (dashFlowPhase + speedMetersPerSec * 0.21 * dt) % 1.0;
+            idleFlowPhase = (idleFlowPhase + 0.09 * dt) % 1.0;
+
+            roadUniforms.uRainbowFlow.value = rainbowFlowPhase;
+            roadUniforms.uWavePhase.value = waveFlowPhase;
+            roadUniforms.uDashPhase.value = dashFlowPhase;
+            roadUniforms.uIdlePhase.value = idleFlowPhase;
+            const targetRainbow = rainbowEnabled ? 1.0 : 0.0;
+            roadUniforms.uRainbow.value += (targetRainbow - roadUniforms.uRainbow.value) * Math.min(1.0, dt * 6.0);
+            roadUniforms.uSpeedNorm.value = speedNorm;
+
+            // 僅於整數時速變化時更新 DOM 文字，避免每幀觸發 WebView 版面重繪
+            const roundedKmh = Math.round(currentSpeedKmh);
+            if (roundedKmh !== lastDisplayedKmh) {
+                lastDisplayedKmh = roundedKmh;
+                speedReadout.innerText = roundedKmh + ' km/h';
+            }
+
+            const isDriving = currentSpeedKmh >= 2.0;
+
+            // 高速行駛微幅拉開視野增加速度感
+            const targetFov = 46 + speedNorm * 5.0;
+            if (Math.abs(camera.fov - targetFov) > 0.05) {
+                camera.fov += (targetFov - camera.fov) * Math.min(1.0, dt * 3.0);
+                camera.updateProjectionMatrix();
+                updateSafeCameraDistanceBounds();
+            }
+
+            // 始終將觀察目標維持在車輛中心
+            controls.target.copy(fsdLookAtBase);
+
+            if (isDriving) {
+                // 行駛中鎖定車尾追隨視角，確保車屁股朝使用者
+                if (!isUserInteracting) {
+                    desiredCamPos.set(0, 1.62 + speedNorm * 0.12, defaultFollowDist + speedNorm * 0.35);
+                    desiredLookAt.copy(fsdLookAtBase);
+                    camera.position.lerp(desiredCamPos, Math.min(1.0, dt * 4.5));
+                    currentCamTarget.lerp(desiredLookAt, Math.min(1.0, dt * 4.5));
+                    controls.target.copy(currentCamTarget);
+                }
+            } else {
+                // 靜止無觸控時平順回歸標準車尾視角，並保留手動縮放距離
+                if (!isUserInteracting) {
+                    const curDist = Math.max(controls.minDistance, Math.min(controls.maxDistance, camera.position.distanceTo(fsdLookAtBase)));
+                    _camDir.set(0, 1.62 - fsdLookAtBase.y, defaultFollowDist).normalize().multiplyScalar(curDist);
+                    desiredCamPos.copy(fsdLookAtBase).add(_camDir);
+                    camera.position.lerp(desiredCamPos, Math.min(1.0, dt * 3.0));
+                    currentCamTarget.lerp(fsdLookAtBase, Math.min(1.0, dt * 3.0));
+                    controls.target.copy(currentCamTarget);
+                }
+            }
+
+            controls.update();
+            enforceCameraBounds();
+            renderer.render(scene, camera);
+        }
+        updateSafeCameraDistanceBounds();
+        requestAnimationFrame(animate);
+    </script>
+</body>
+</html>
